@@ -1,99 +1,70 @@
-# Fast and Simple Spectral Clustering in Theory and Practice
-Fast spectral clustering, described in the NeurIPS'23 paper "Fast and Simple Spectral Clustering in Theory and Practice".
+# FastSC reproduction
 
-## Background
-This paper describes a simple variant of the spectral clustering algorithm based
-on embedding the vertices of the graph in log(k) dimensions, rather than the
-usual k dimensions.
-Furthermore, this embedding can be computed by a simple application of the power
-method with the Laplacian matrix of the graph.
+Reproduction of *Fast and Simple Spectral Clustering in Theory and Practice*
+on the 18 datasets in `../data/D-Spec`.
 
-## Algorithm 
-The algorithm is very simple to implement in python. The following is a complete
-implementation of the algorithm, and can be easily modified to work with any
-specific application.
+## Protocol
 
-```python
-import stag.graph
-import math
-from sklearn.cluster import KMeans
-import numpy as np
+The implementation follows Algorithm 2 in the paper:
 
-def fast_spectral_cluster(g: stag.graph.Graph, k: int):
-    l = max(2, math.ceil(math.log(k, 2)))
-    t = 10 * math.ceil(math.log(g.number_of_vertices() / k, 2))
-    M = g.normalised_signless_laplacian()
-    Y = np.random.normal(size=(g.number_of_vertices(), l))
+1. Min-Max normalize every feature column.
+2. Construct an unweighted, union-symmetrized nearest-neighbour graph.
+3. Use `l = max(2, ceil(log2(k)))` Gaussian vectors and the normalized
+   signless operator `M = (I + D^(-1/2) A D^(-1/2)) / 2`.
+4. Run the power method and cluster `D^(-1/2)Y` with KMeans (`n_init=1`).
 
-    for _ in range(t):
-        Y = M @ Y
+Parameter search uses seed `42` and the following default grid:
 
-    Y, _, _ = np.linalg.svd(Y, full_matrices=False)
+- graph neighbours: `3, 5, 10, 15, 20, 30`
+- power-method constant: `1, 2, 5, 10, 15, 20, 30`
 
-    kmeans = KMeans(n_clusters=k, n_init='auto')
-    kmeans.fit(Y)
-    return kmeans.labels_
-```
+The best setting maximizes NMI, with ties broken by ARI, Hungarian-aligned
+macro-F1, and then lower parameter complexity. The chosen setting is then run
+with seeds `42, 3407, 4079, 2024, 0`. Reported standard deviations use
+`ddof=0`.
 
-The [stag library](https://staglibrary.io) is a library for working with graph objects. If you have the adjacency matrix, you can either create a stag Graph object with `g = stag.graph.Graph(adjacency_matrix)`, or construct the normalised signless Laplacian with the following method.
+Runtime is measured independently for every reproduction seed, starting before
+loading the MATLAB file and ending immediately after predicted labels are
+obtained. It therefore includes loading, Min-Max normalization, nearest-neighbour
+graph construction, operator construction, power iterations, and KMeans. Metric
+calculation, saving, and plotting are excluded.
 
-```
-def signless_laplacian(A):
-    n = A.shape[0]
-    D = scipy.sparse.diags(A.sum(axis=1).A1)
-    D_inv_half = scipy.sparse.diags(1 / numpy.sqrt(D.diagonal()))
-    L = D + A
-    N = D_inv_half @ L @ D_inv_half
-    return M
-```
+## Usage
 
-## Reproducing the experiments
+Install dependencies:
 
-### Installing Dependencies
-Install the python package dependencies with pip.
-
-```
+```bash
 pip install -r requirements.txt
 ```
 
-### Running Experiments
-Run the experiments with the following command.
+Run search and reproduction for all datasets with dataset-level parallelism:
 
-```
-python main.py run {experiment}
-```
-
-where `{experiment}` is one of `fig2a`, `fig2b`, `mnist`, `pen`, `fashion`, `har`, or `letter`.
-These correspond to the experiments reported in the paper, where `fig2a` and `fig2b`
-are the experiments on the stochastic block model.
-
-### Plotting the results
-The figures included in the paper can be generated with the following commands.
-
-```
-python main.py plot fig2a
-python main.py plot fig2b
+```bash
+python main.py all --jobs 6 --knn-jobs 8
 ```
 
-## Issues
+The phases can also be run separately or on selected datasets:
 
-If you have any issues when using this software, please don't hesitate to get in touch. You can contact me using the contact details on [my website](https://pmacg.io) or you can raise an issue on this repository in Github and I will be happy to help.
-
-## Reference
-
-If you use this software in your work, you can cite it as follows.
-
-```
-Macgregor, Peter. "Fast and simple spectral clustering in theory and practice." Advances in Neural Information Processing Systems 36 (2023): 34410-34425.
+```bash
+python main.py search --datasets spiral 4C AC --jobs 3
+python main.py reproduce --datasets spiral 4C AC --jobs 3
 ```
 
-If you use bibtex, you can copy the following into your bibtex file.
+Use `--skip-existing` to resume without recomputing completed search or
+reproduction files. Search grids can be overridden with `--neighbors-grid` and
+`--t-const-grid`.
 
-```
-@inproceedings{macgregorFastSpectralClustering2023,
-  title = {Fast and Simple Spectral Clustering in Theory and Practice},
-  booktitle = {36th {{Advances}} in {{Neural Information Processing Systems}} ({{NeurIPS}}'23)},
-  author = {Macgregor, Peter},
-  year = {2023}
-}
-```
+## Outputs
+
+Each `results/<dataset>/` directory contains:
+
+- `search.csv`: all seed-42 parameter-search results;
+- `best_params.json`: selected parameters and search metrics;
+- `best_labels_seed42.npy` and `.csv`: seed-42 labels at the best setting;
+- `plots/clustering_result.jpg` and `plots/true_labels.jpg`;
+- `runs.csv`: the five fixed-parameter reproduction runs;
+- `summary.json`: mean and population standard deviation.
+
+The final aggregate is written to `fastsc.csv` in the requested dataset order.
+Its columns contain dataset size, dimensionality, class count, NMI/ARI/macro-F1
+and runtime mean/std, and the selected parameters.
