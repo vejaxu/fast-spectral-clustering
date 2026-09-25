@@ -50,6 +50,13 @@ python main.py search --datasets spiral 4C AC --jobs 3
 python main.py reproduce --datasets spiral 4C AC --jobs 3
 ```
 
+The five datasets in `../data/large_data` can be run with the same protocol.
+For their larger memory footprint, run them one at a time:
+
+```bash
+python main.py all --datasets data_TB1M data_SF2M data_CC5M data_CG10M data_Flower20M --jobs 1 --skip-existing
+```
+
 Use `--skip-existing` to resume without recomputing completed search or
 reproduction files. Search grids can be overridden with `--neighbors-grid` and
 `--t-const-grid`.
